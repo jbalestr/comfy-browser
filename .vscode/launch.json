@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ComfyUI Browser",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "comfy_browser",
+      "args": ["${input:outputFolder}"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ],
+  "inputs": [
+    {
+      "id": "outputFolder",
+      "type": "promptString",
+      "description": "Path to your ComfyUI output folder",
+      "default": "/mnt/c/Users/YourName/ComfyUI/output"
+    }
+  ]
+}
