@@ -103,7 +103,7 @@ def _handle_latent_size(inputs: dict, info: ExtractedInfo) -> None:
     info.height = inputs.get("height")
 
 
-_EMBEDDING_PATTERN = re.compile(r"embedding:([^\s,>]+)")
+_EMBEDDING_PATTERN = re.compile(r"embedding:([^\s,>():]+)")
 
 
 @register("CLIPTextEncode")
@@ -113,17 +113,88 @@ def _handle_text_encode(inputs: dict, info: ExtractedInfo) -> None:
         return
     for emb in _EMBEDDING_PATTERN.findall(text):
         info.embeddings.add(emb)
-    # Heuristic: ComfyUI doesn't label positive/negative explicitly.
-    # First CLIPTextEncode seen becomes positive, next distinct one negative.
-    if not info.positive_prompt:
-        info.positive_prompt = text
-    elif text != info.positive_prompt and not info.negative_prompt:
-        info.negative_prompt = text
 
 
 def _matches_lora_fallback(class_type: str) -> bool:
     """Catch custom/third-party LoRA loader variants not explicitly named."""
     return class_type.startswith("Lora") and class_type not in _HANDLERS
+
+
+# Node types known to pass a single CONDITIONING input through to their
+# output, possibly modified, without combining multiple distinct prompts.
+# When tracing back from a sampler's positive/negative input, we follow
+# through these rather than stopping at them — they're not the source.
+_CONDITIONING_PASSTHROUGH_TYPES = {
+    "ConditioningSetArea",
+    "ConditioningSetMask",
+    "ControlNetApply",
+    "ControlNetApplyAdvanced",
+    "ConditioningZeroOut",
+    "GLIGENTextBoxApply",
+}
+
+# A connection in ComfyUI's prompt JSON is represented as [node_id, output_index].
+_MAX_TRACE_HOPS = 10  # guard against any unexpected cycles in malformed graphs
+
+
+def _resolve_prompt_text(prompt_graph: dict, link: object, hops: int = 0) -> Optional[str]:
+    """Follow a [node_id, output_index] connection backward through the
+    graph until it reaches a CLIPTextEncode node, returning its text.
+    Passes through known pass-through conditioning nodes; stops (returns
+    None) at anything else it doesn't recognise, rather than guessing."""
+    if hops > _MAX_TRACE_HOPS:
+        return None
+    if not (isinstance(link, list) and len(link) == 2):
+        return None
+
+    source_node_id = str(link[0])
+    source_node = prompt_graph.get(source_node_id)
+    if not isinstance(source_node, dict):
+        return None
+
+    class_type = source_node.get("class_type", "")
+    inputs = source_node.get("inputs", {})
+
+    if class_type == "CLIPTextEncode":
+        text = inputs.get("text", "")
+        return text if isinstance(text, str) else None
+
+    if class_type in _CONDITIONING_PASSTHROUGH_TYPES:
+        # Follow the first conditioning-shaped input we find onward.
+        upstream = inputs.get("conditioning")
+        if upstream is None:
+            # Some nodes don't name it "conditioning" consistently;
+            # fall back to scanning for any [id, idx]-shaped input.
+            for v in inputs.values():
+                if isinstance(v, list) and len(v) == 2:
+                    upstream = v
+                    break
+        return _resolve_prompt_text(prompt_graph, upstream, hops + 1)
+
+    return None
+
+
+def _resolve_positive_negative(prompt_graph: dict, info: ExtractedInfo) -> None:
+    """Find KSampler-family nodes and trace their positive/negative
+    inputs back to the actual CLIPTextEncode node feeding them, rather
+    than guessing based on visit order."""
+    for node in prompt_graph.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") not in ("KSampler", "KSamplerAdvanced"):
+            continue
+
+        inputs = node.get("inputs", {})
+
+        if not info.positive_prompt:
+            pos_text = _resolve_prompt_text(prompt_graph, inputs.get("positive"))
+            if pos_text:
+                info.positive_prompt = pos_text
+
+        if not info.negative_prompt:
+            neg_text = _resolve_prompt_text(prompt_graph, inputs.get("negative"))
+            if neg_text:
+                info.negative_prompt = neg_text
 
 
 def extract_from_prompt_graph(prompt: dict) -> dict:
@@ -141,6 +212,8 @@ def extract_from_prompt_graph(prompt: dict) -> dict:
             handler = _handle_lora
         if handler:
             handler(inputs, info)
+
+    _resolve_positive_negative(prompt, info)
 
     return info.to_dict()
 

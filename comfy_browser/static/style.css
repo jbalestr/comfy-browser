@@ -24,13 +24,41 @@ body {
 }
 #sidebar h2 { font-size: 14px; margin: 0 0 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
 .filter-group { margin-bottom: 20px; }
-.filter-group h3 { font-size: 12px; color: var(--text-dim); margin: 0 0 6px; text-transform: uppercase; }
+.filter-group h3 { font-size: 12px; color: var(--text-dim); margin: 0; text-transform: uppercase; }
+.filter-group-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 6px;
+}
+.sort-toggle {
+  background: transparent; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-dim); font-size: 10px; padding: 2px 6px; cursor: pointer;
+  flex-shrink: 0; white-space: nowrap;
+}
+.sort-toggle:hover { color: var(--text); border-color: var(--accent); }
+.threshold-control {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-dim); margin-bottom: 6px;
+}
+.threshold-control input {
+  width: 48px; padding: 2px 4px; background: #0f1012;
+  border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 11px;
+}
+.filter-group-scroll {
+  max-height: 220px; overflow-y: auto; padding-right: 4px;
+}
 .filter-option {
   display: flex; align-items: center; gap: 6px;
   font-size: 13px; padding: 3px 0; cursor: pointer; color: var(--text);
 }
-.filter-option input { cursor: pointer; }
-.filter-count { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+.filter-option input { cursor: pointer; flex-shrink: 0; }
+.filter-option .filter-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+.filter-count {
+  color: var(--text-dim); font-size: 11px;
+  flex-shrink: 0; min-width: 1.5em; text-align: right;
+}
 #search {
   width: 100%; padding: 8px; margin-bottom: 16px;
   background: #0f1012; border: 1px solid var(--border); border-radius: 6px;
