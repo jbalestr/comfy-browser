@@ -52,3 +52,16 @@ Each module has one job:
 A `.comfy_browser_cache.json` file is created inside your output folder
 to persist the cache between runs. Use the "Rescan folder" button in the
 UI to force a full re-parse.
+
+## Performance note
+
+Earlier versions accidentally triggered a full pixel decode per image
+(via `hasattr(img, "text")`, which forces Pillow to fully load the image
+to guarantee all text chunks are parsed). Fixed by reading `img.info`
+directly, which Pillow populates from PNG metadata chunks during `open()`
+without decoding pixel data. This took a ~2,800 file folder from roughly
+75-90 seconds down to well under a second on a cold scan.
+
+The first scan (or a forced rescan) now also runs on a background thread
+with progress shown in the UI, so a slow cold scan on a very large or
+slow disk no longer makes the page look hung.

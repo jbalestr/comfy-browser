@@ -17,6 +17,7 @@ from typing import Callable, Optional, Protocol
 from .cache import FileCache
 
 MetadataExtractor = Callable[[Path], Optional[dict]]
+ProgressCallback = Callable[[int, int], None]  # (done_count, total_count)
 
 EMPTY_FIELDS = {
     "checkpoints": [], "loras": [], "embeddings": [],
@@ -46,9 +47,23 @@ class FolderScanner:
         self.extractor = extractor
         self.cache = cache if cache is not None else FileCache(self.folder / CACHE_FILENAME)
 
-    def scan(self, force_refresh: bool = False) -> list[dict]:
+    def scan(
+        self,
+        force_refresh: bool = False,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> list[dict]:
         """Return metadata for every PNG under the folder (recursive).
-        Unchanged files are served from cache unless force_refresh is set."""
+        Unchanged files are served from cache unless force_refresh is set.
+
+        Parsing reads only the PNG metadata text chunk, not pixel data,
+        so even a few thousand files is fast — no need for concurrency
+        here (a thread pool was tried and measured slower, since the
+        per-file work is now too cheap for thread overhead to pay off).
+
+        on_progress, if given, is called periodically with
+        (files_parsed_so_far, total_files_needing_parse) so a caller
+        (e.g. the HTTP server) can report scan progress to the UI.
+        """
         if not self.folder.exists():
             return []
 
@@ -61,9 +76,18 @@ class FolderScanner:
             reverse=True,
         )
 
+        # First pass: figure out how many files actually need parsing,
+        # so progress reporting has a meaningful total up front.
+        to_parse_count = 0
+        for png_path in png_files:
+            rel_path = str(png_path.relative_to(self.folder))
+            stat = png_path.stat()
+            if self.cache.get(rel_path, stat.st_mtime, stat.st_size) is None:
+                to_parse_count += 1
+
         results: list[dict] = []
         fresh_store: dict[str, dict] = {}
-        any_new = False
+        done_count = 0
 
         for png_path in png_files:
             rel_path = str(png_path.relative_to(self.folder))
@@ -74,7 +98,9 @@ class FolderScanner:
                 entry = cached
             else:
                 entry = self._build_entry(png_path, rel_path, stat.st_mtime)
-                any_new = True
+                done_count += 1
+                if on_progress and (done_count % 25 == 0 or done_count == to_parse_count):
+                    on_progress(done_count, to_parse_count)
 
             self.cache.put(rel_path, stat.st_mtime, stat.st_size, entry)
             fresh_store[self.cache._stamp_key(rel_path, stat.st_mtime, stat.st_size)] = entry
@@ -82,7 +108,7 @@ class FolderScanner:
 
         # Drop entries for files that no longer exist, then persist.
         self.cache.replace_all(fresh_store)
-        if any_new or force_refresh:
+        if to_parse_count > 0 or force_refresh:
             self.cache.save()
 
         return results

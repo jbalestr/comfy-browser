@@ -147,14 +147,22 @@ def extract_from_prompt_graph(prompt: dict) -> dict:
 
 def extract_png_metadata(path: Path) -> Optional[dict]:
     """Read a PNG file and return extracted metadata, or None if it has
-    no ComfyUI 'prompt' chunk or it isn't valid JSON."""
+    no ComfyUI 'prompt' chunk or it isn't valid JSON.
+
+    Uses img.info rather than img.text: PIL's .text property is a
+    @property that calls self.load() to guarantee every tEXt chunk has
+    been parsed, which decodes the full pixel data as a side effect —
+    extremely expensive for thousands of files when we only want a
+    small text chunk. img.info is already populated by Image.open()
+    for the chunks PIL encounters before the image data starts (which
+    is where ComfyUI puts its metadata), with no decode needed.
+    """
     try:
         img = Image.open(path)
-        text_chunks = img.text if hasattr(img, "text") else {}
+        prompt_raw = img.info.get("prompt")
     except Exception:
         return None
 
-    prompt_raw = text_chunks.get("prompt")
     if not prompt_raw:
         return None
 

@@ -22,7 +22,7 @@ from pathlib import Path
 from .cache import FileCache
 from .metadata import extract_png_metadata
 from .scanner import CACHE_FILENAME, FolderScanner
-from .server import create_server
+from .server import ScanCoordinator, create_server
 
 DEFAULT_PORT = 8765
 
@@ -43,14 +43,12 @@ def main(argv: list[str] | None = None) -> None:
 
     cache = FileCache(cache_path=Path(args.folder) / CACHE_FILENAME)
     scanner = FolderScanner(folder=args.folder, extractor=extract_png_metadata, cache=cache)
+    coordinator = ScanCoordinator(scanner)
 
-    print(f"Scanning {args.folder} ...")
-    count = len(scanner.scan())
-    print(f"Found {count} PNG file(s). Metadata cached in {CACHE_FILENAME} "
-          f"(new/changed files are re-scanned automatically).")
-
-    server = create_server(args.folder, scanner, args.port)
+    server = create_server(coordinator, args.port)
     print(f"Serving at http://localhost:{args.port}")
+    print(f"Watching {args.folder} (metadata cached in {CACHE_FILENAME}; "
+          f"first scan of new/changed files happens in the browser, with progress shown there).")
     print("Press Ctrl+C to stop.")
 
     try:

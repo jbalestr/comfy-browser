@@ -12,12 +12,61 @@ const FILTER_GROUPS = [
 
 // ---------- Data loading ----------
 
+const POLL_INTERVAL_MS = 600;
+let pollHandle = null;
+
 async function loadData(forceRefresh) {
   const url = forceRefresh ? "/api/data?refresh=1" : "/api/data";
   const res = await fetch(url);
-  DATA = await res.json();
-  buildFilters();
-  render();
+  const payload = await res.json();
+  handleScanPayload(payload);
+
+  if (payload.scanning) {
+    startPolling();
+  }
+}
+
+function startPolling() {
+  if (pollHandle) return; // already polling
+  pollHandle = setInterval(async () => {
+    const res = await fetch("/api/data");
+    const payload = await res.json();
+    handleScanPayload(payload);
+    if (!payload.scanning) {
+      stopPolling();
+    }
+  }, POLL_INTERVAL_MS);
+}
+
+function stopPolling() {
+  if (pollHandle) {
+    clearInterval(pollHandle);
+    pollHandle = null;
+  }
+}
+
+function handleScanPayload(payload) {
+  updateScanBanner(payload);
+  if (payload.data !== null) {
+    DATA = payload.data;
+    buildFilters();
+    render();
+  }
+}
+
+function updateScanBanner(payload) {
+  const banner = document.getElementById("scan-banner");
+  if (!payload.scanning) {
+    banner.style.display = "none";
+    return;
+  }
+  banner.style.display = "block";
+  if (payload.total > 0) {
+    const pct = Math.round((payload.done / payload.total) * 100);
+    banner.textContent = `Scanning new images: ${payload.done} / ${payload.total} (${pct}%)${payload.data ? " — showing previous results below" : ""}`;
+  } else {
+    banner.textContent = "Scanning folder...";
+  }
 }
 
 // ---------- Filter sidebar ----------
@@ -212,11 +261,22 @@ function init() {
     btn.disabled = true;
     btn.textContent = "Rescanning...";
     await loadData(true);
-    btn.disabled = false;
-    btn.textContent = "Rescan folder";
+    waitForScanToFinishThenResetButton(btn);
   });
 
   loadData(false);
+}
+
+function waitForScanToFinishThenResetButton(btn) {
+  const checkInterval = setInterval(async () => {
+    const res = await fetch("/api/scan-status");
+    const status = await res.json();
+    if (!status.running) {
+      clearInterval(checkInterval);
+      btn.disabled = false;
+      btn.textContent = "Rescan folder";
+    }
+  }, POLL_INTERVAL_MS);
 }
 
 init();
